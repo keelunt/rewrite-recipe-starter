@@ -442,7 +442,7 @@ public class StaticizeNonOverridableMethodsTest implements RewriteTest {
         );
     }
 
-    @Disabled("nested case with circular reference, two methods call to each other, and both can be static")
+    @Disabled("nested case with circular reference, two (or more) methods call to each other, and both can be static. this case can not be covered by running the recipe multiple times.")
     @Test
     void nestedCircularReferenceClassMethods() {
         rewriteRun(

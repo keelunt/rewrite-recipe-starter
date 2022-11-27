@@ -48,20 +48,44 @@ public class StaticizeNonOverridableMethods extends Recipe {
 
   @Override
   public JavaIsoVisitor<ExecutionContext> getVisitor() {
+    final List<J.MethodDeclaration> instanceMethods = new ArrayList<>();
+    final List<J.VariableDeclarations.NamedVariable> instanceVariables = new ArrayList<>();
+
     return new JavaIsoVisitor<ExecutionContext>() {
-      final List<J.MethodDeclaration> staticInstanceMethods = new ArrayList<>();
 
       @Override
       public J.ClassDeclaration visitClassDeclaration(J.ClassDeclaration classDecl, ExecutionContext ctx) {
-        staticInstanceMethods.addAll(FindStaticInstanceMethods.find(getCursor().getValue()));
+        // Skip nested class (inner class or static nested class)
+        boolean isNestedClass = classDecl.getType() != null && classDecl.getType().getOwningClass() != null;
+        if (isNestedClass) {
+          return classDecl;
+        }
+
+        instanceVariables.addAll(getInstanceVariables(classDecl));
+        instanceMethods.addAll(getInstanceMethods(classDecl));
         return super.visitClassDeclaration(classDecl, ctx);
       }
 
       @Override
       public J.MethodDeclaration visitMethodDeclaration(J.MethodDeclaration method, ExecutionContext ctx) {
-        boolean canBeStatic = staticInstanceMethods.stream()
-            .anyMatch(m -> method.getSimpleName().equals(m.getSimpleName()));
-        return canBeStatic ? addStaticModifier(method) : method;
+        J.MethodDeclaration m = super.visitMethodDeclaration(method, ctx);
+
+        // if it already has `static` modifier, it doesn't need to add again.
+        if (m.hasModifier(J.Modifier.Type.Static)) {
+          return m;
+        }
+
+        // if it's an overridable methods (neither `private` nor `final`), we don't want to add `static`.
+        if (!m.hasModifier(J.Modifier.Type.Private) && !m.hasModifier(J.Modifier.Type.Final)) {
+          return m;
+        }
+
+        boolean hasInstanceDataAccess = FindInstanceDataAccess.find(getCursor().getValue(),
+            instanceMethods,
+            instanceVariables
+        ).get();
+
+        return hasInstanceDataAccess ? method : addStaticModifier(m);
       }
     };
   }
@@ -124,72 +148,6 @@ public class StaticizeNonOverridableMethods extends Recipe {
   }
 
   /**
-   * Visitor to find all non-overridable instance methods (private or final) which don't access instance data,
-   * so they can be static.
-   */
-  @EqualsAndHashCode(callSuper = true)
-  private static class FindStaticInstanceMethods extends JavaIsoVisitor<List<J.MethodDeclaration>> {
-    private final List<J.MethodDeclaration> instanceMethods;
-    private final List<J.VariableDeclarations.NamedVariable> instanceVariables;
-
-    private FindStaticInstanceMethods() {
-      this.instanceMethods = new ArrayList<>();
-      this.instanceVariables = new ArrayList<>();
-    }
-
-    /**
-     * @param j The subtree to search, supposed to be a class declaration cursor.
-     * @return a list of instance methods that can be static.
-     */
-    static List<J.MethodDeclaration> find(J j) {
-      return new FindStaticInstanceMethods()
-          .reduce(j, new ArrayList<>());
-    }
-
-    @Override
-    public J.ClassDeclaration visitClassDeclaration(J.ClassDeclaration classDecl,
-        List<J.MethodDeclaration> staticInstanceMethods
-    ) {
-      // Skip nested class (inner class or static nested class)
-      boolean isNestedClass = classDecl.getType() != null && classDecl.getType().getOwningClass() != null;
-      if (isNestedClass) {
-        return classDecl;
-      }
-
-      instanceVariables.addAll(getInstanceVariables(classDecl));
-      instanceMethods.addAll(getInstanceMethods(classDecl));
-      return super.visitClassDeclaration(classDecl, staticInstanceMethods);
-    }
-
-    @Override
-    public J.MethodDeclaration visitMethodDeclaration(J.MethodDeclaration method,
-        List<J.MethodDeclaration> staticInstanceMethods
-    ) {
-      J.MethodDeclaration m = super.visitMethodDeclaration(method, staticInstanceMethods);
-
-      // if it already has `static` modifier, it doesn't need to add again.
-      if (m.hasModifier(J.Modifier.Type.Static)) {
-        return m;
-      }
-
-      // if it's an overridable methods (neither `private` nor `final`), we don't want to add `static`.
-      if (!m.hasModifier(J.Modifier.Type.Private) && !m.hasModifier(J.Modifier.Type.Final)) {
-        return m;
-      }
-
-      boolean hasInstanceDataAccess = FindInstanceDataAccess.find(getCursor().getValue(),
-          instanceMethods,
-          instanceVariables
-      ).get();
-
-      if (!hasInstanceDataAccess) {
-        staticInstanceMethods.add(m);
-      }
-      return m;
-    }
-  }
-
-  /**
    * Visitor to find instance data access in a method
    */
   @EqualsAndHashCode(callSuper = true)
@@ -205,7 +163,7 @@ public class StaticizeNonOverridableMethods extends Recipe {
     }
 
     /**
-     * @param j The subtree to search.
+     * @param j The subtree to search, points to a method.
      * @return whether has instance data access in this method
      */
     static AtomicBoolean find(J j,
