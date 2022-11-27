@@ -7,11 +7,11 @@ import org.openrewrite.test.RewriteTest;
 
 import static org.openrewrite.java.Assertions.*;
 
-public class StaticizeNonOverridableMethodsTest implements RewriteTest {
+public class StaticizeNonOverridableMethodsV2Test implements RewriteTest {
 
     @Override
     public void defaults(RecipeSpec spec) {
-        spec.recipe(new StaticizeNonOverridableMethods());
+        spec.recipe(new StaticizeNonOverridableMethodsV2());
     }
 
     @Test
@@ -227,20 +227,20 @@ public class StaticizeNonOverridableMethodsTest implements RewriteTest {
                           }
                         }
                     """,
-                    """
-                        class A {
-                          int a = 1;
-                                            
-                          private static int func(int b) {
-                            int c = 2;
-                            for (int i = 0; i < b ;i++) {
-                              int a = 2;
-                              c += a;
-                            }
-                            return c + 1;
-                          }
+                """
+                    class A {
+                      int a = 1;
+                                        
+                      private static int func(int b) {
+                        int c = 2;
+                        for (int i = 0; i < b ;i++) {
+                          int a = 2;
+                          c += a;
                         }
-                        """
+                        return c + 1;
+                      }
+                    }
+                    """
             )
         );
     }
@@ -404,7 +404,6 @@ public class StaticizeNonOverridableMethodsTest implements RewriteTest {
         );
     }
 
-    @Disabled("Recursive is not supported")
     @Test
     void recursive() {
         rewriteRun(
@@ -426,7 +425,6 @@ public class StaticizeNonOverridableMethodsTest implements RewriteTest {
         );
     }
 
-    @Disabled("For this nested case (without circular reference), current recipe can staticize `func1` only. this case can be covered by running the recipe multiple times.")
     @Test
     void nestedClassMethods() {
         rewriteRun(
