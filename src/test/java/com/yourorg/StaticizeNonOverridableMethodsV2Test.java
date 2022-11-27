@@ -479,41 +479,37 @@ public class StaticizeNonOverridableMethodsV2Test implements RewriteTest {
         rewriteRun(
             java("""
                         class CollatzConjecture {
-                          private int odd(int n) {
+                          private void odd(int n) {
                             if (n != 1) {
                               even(3 * n + 1);
                             }
-                            return n;
                           }
                         
-                          private int even(int n) {
+                          private void even(int n) {
                             n = n /2;
                             if (n % 2 == 0) {
                               even(n);
                             } else {
                               odd(n);
                             }
-                            return n;
                           }
                         }
                     """,
                 """
                         class CollatzConjecture {
-                          private static int odd(int n) {
+                          private static void odd(int n) {
                             if (n != 1) {
                               even(3 * n + 1);
                             }
-                            return n;
                           }
                         
-                          private static int even(int n) {
+                          private static void even(int n) {
                             n = n /2;
                             if (n % 2 == 0) {
                               even(n);
                             } else {
                               odd(n);
                             }
-                            return n;
                           }
                         }
                     """
