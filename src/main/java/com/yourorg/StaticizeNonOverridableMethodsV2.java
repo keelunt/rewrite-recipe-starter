@@ -63,7 +63,7 @@ public class StaticizeNonOverridableMethodsV2 extends Recipe {
         Graph<String, J> graph = BuildInstanceDataAccessGraph.build(classDecl);
         System.out.println(graph.print());
 
-        findStaticMethods(graph, staticInstanceMethods);
+        staticInstanceMethods.addAll(findStaticMethods(graph));
         return super.visitClassDeclaration(classDecl, ctx);
       }
 
@@ -76,35 +76,51 @@ public class StaticizeNonOverridableMethodsV2 extends Recipe {
     };
   }
 
-  private void findStaticMethods(Graph<String, J> graph, List<J.MethodDeclaration> mm) {
-    graph.resetReachedCount();
-    Queue<Graph<String, J>.Node> methodsQueue = graph.getNodesMap().values()
+  private List<J.MethodDeclaration> findStaticMethods(Graph<String, J> graph) {
+    Set<J.MethodDeclaration> instanceAccessedMethods = new HashSet<>();
+
+    // a queue to store instance data accessed elements, either instance variables or overridable instance methods.
+    Queue<Graph<String, J>.Node> accessedQueue = graph.getNodesMap().values()
         .stream()
-        .filter(node -> node.getInDegree() == 0)
-        .filter(node -> node.getElement() instanceof J.MethodDeclaration)
-        .filter(node -> isNonOverridableMethod((J.MethodDeclaration) node.getElement()))
+        .filter(node -> isInstanceDataAccessed(node.element))
         .collect(Collectors.toCollection(LinkedList::new));
     Set<String> visitedNodeIds = new HashSet<>();
 
-    while (!methodsQueue.isEmpty()) {
-      Graph<String, J>.Node node = methodsQueue.poll();
+    while (!accessedQueue.isEmpty()) {
+      Graph<String, J>.Node node = accessedQueue.poll();
       if (visitedNodeIds.contains(node.getId())) {
         continue;
       }
       visitedNodeIds.add(node.getId());
 
-      J.MethodDeclaration m = (J.MethodDeclaration) node.getElement();
-      mm.add(m);
-
-      for (Graph<String, J>.Node linkedNode : node.getLinks()) {
-        int newReachCount = linkedNode.getReachedCount() + 1;
-        linkedNode.setReachedCount(newReachCount);
-        J.MethodDeclaration invoker = (J.MethodDeclaration) linkedNode.getElement();
-        if (isNonOverridableMethod(invoker) && newReachCount == linkedNode.getInDegree()) {
-          methodsQueue.add(linkedNode);
-        }
+      if (node.getElement() instanceof J.MethodDeclaration) {
+        instanceAccessedMethods.add((J.MethodDeclaration) node.getElement() );
       }
+
+      accessedQueue.addAll(node.getLinks());
     }
+
+    return graph.getNodesMap()
+        .values()
+        .stream()
+        .map(Graph.Node::getElement)
+        .filter(element -> element instanceof J.MethodDeclaration)
+        .map(J.MethodDeclaration.class::cast)
+        .filter(m -> !instanceAccessedMethods.contains(m))
+        .collect(Collectors.toList());
+  }
+
+  private boolean isInstanceDataAccessed(J element) {
+    if (element instanceof J.Identifier) {
+      // it's an instance variable
+      return true;
+    }
+
+    if (element instanceof J.MethodDeclaration) {
+      return !isNonOverridableMethod((J.MethodDeclaration) element);
+    }
+
+    return false;
   }
 
   /**
