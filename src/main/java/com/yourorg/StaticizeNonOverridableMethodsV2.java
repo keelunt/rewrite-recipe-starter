@@ -49,6 +49,7 @@ public class StaticizeNonOverridableMethodsV2 extends Recipe {
 
   @Override
   public JavaIsoVisitor<ExecutionContext> getVisitor() {
+    // list of non-overridable instance methods that can be static
     final List<J.MethodDeclaration> staticInstanceMethods = new ArrayList<>();
 
     return new JavaIsoVisitor<ExecutionContext>() {
@@ -79,15 +80,16 @@ public class StaticizeNonOverridableMethodsV2 extends Recipe {
   private List<J.MethodDeclaration> findStaticMethods(Graph<String, J> graph) {
     Set<J.MethodDeclaration> instanceAccessedMethods = new HashSet<>();
 
-    // a queue to store instance data accessed elements, either instance variables or overridable instance methods.
-    Queue<Graph<String, J>.Node> accessedQueue = graph.getNodesMap().values()
+    // a queue to store instance data accessed elements, an element can be either instance variable or overridable instance method.
+    Queue<Graph<String, J>.Node> accessedElements = graph.getNodesMap().values()
         .stream()
         .filter(node -> isInstanceDataAccessed(node.element))
         .collect(Collectors.toCollection(LinkedList::new));
     Set<String> visitedNodeIds = new HashSet<>();
 
-    while (!accessedQueue.isEmpty()) {
-      Graph<String, J>.Node node = accessedQueue.poll();
+    // propagate instance data accessed methods in graph, so the rest methods are not instance data accessed and can be static.
+    while (!accessedElements.isEmpty()) {
+      Graph<String, J>.Node node = accessedElements.poll();
       if (visitedNodeIds.contains(node.getId())) {
         continue;
       }
@@ -97,7 +99,9 @@ public class StaticizeNonOverridableMethodsV2 extends Recipe {
         instanceAccessedMethods.add((J.MethodDeclaration) node.getElement() );
       }
 
-      accessedQueue.addAll(node.getLinks());
+      if (!node.getLinks().isEmpty()) {
+        accessedElements.addAll(node.getLinks());
+      }
     }
 
     return graph.getNodesMap()
@@ -110,6 +114,7 @@ public class StaticizeNonOverridableMethodsV2 extends Recipe {
         .collect(Collectors.toList());
   }
 
+  // Any element (method or variable) accessed instance variable or overridable methods(public, protected, or package-private) can not be static.
   private boolean isInstanceDataAccessed(J element) {
     if (element instanceof J.Identifier) {
       // it's an instance variable
@@ -264,14 +269,6 @@ public class StaticizeNonOverridableMethodsV2 extends Recipe {
     }
   }
 
-  private static String buildInstanceVariableId(J.Identifier v) {
-    return "V_" + v.getSimpleName();
-  }
-
-  private static String buildInstanceMethodId(J.MethodDeclaration m) {
-    return "M_" + m.getSimpleName();
-  }
-
   private static J.MethodDeclaration addStaticModifier(J.MethodDeclaration m) {
     List<J.Modifier> modifiers = m.getModifiers();
 
@@ -329,7 +326,15 @@ public class StaticizeNonOverridableMethodsV2 extends Recipe {
         .collect(Collectors.toList());
   }
 
-  private boolean isNonOverridableMethod(J.MethodDeclaration m) {
+  private static String buildInstanceVariableId(J.Identifier v) {
+    return "V_" + v.getSimpleName();
+  }
+
+  private static String buildInstanceMethodId(J.MethodDeclaration m) {
+    return "M_" + m.getSimpleName();
+  }
+
+  private static boolean isNonOverridableMethod(J.MethodDeclaration m) {
     return m.hasModifier(J.Modifier.Type.Private) || m.hasModifier(J.Modifier.Type.Final);
   }
 }

@@ -428,7 +428,7 @@ public class StaticizeNonOverridableMethodsTest implements RewriteTest {
 
     @Disabled("For this nested case (without circular reference), current recipe can staticize `func1` only. this case can be covered by running the recipe multiple times.")
     @Test
-    void nestedClassMethods() {
+    void nestedInstanceMethods() {
         rewriteRun(
             java("""
                         class A {
@@ -444,6 +444,10 @@ public class StaticizeNonOverridableMethodsTest implements RewriteTest {
                         
                           private int func3(int x) {
                             return func2(x) + 1;
+                          }
+                          
+                          private int func4(int x) {
+                            return func3(x) + a;
                           }
                         }
                     """,
@@ -462,6 +466,10 @@ public class StaticizeNonOverridableMethodsTest implements RewriteTest {
                           private static int func3(int x) {
                             return func2(x) + 1;
                           }
+                          
+                          private int func4(int x) {
+                            return func3(x) + a;
+                          }
                         }
                     """
             )
@@ -470,7 +478,7 @@ public class StaticizeNonOverridableMethodsTest implements RewriteTest {
 
     @Disabled("nested case with circular reference, two (or more) methods call to each other, and both can be static. this case can not be covered by running the recipe multiple times.")
     @Test
-    void nestedCircularReferenceClassMethods() {
+    void nestedCyclicInstanceMethods() {
         rewriteRun(
             java("""
                         class CollatzConjecture {

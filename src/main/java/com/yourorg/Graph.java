@@ -4,9 +4,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import lombok.Data;
 import lombok.Getter;
-import lombok.Setter;
-import lombok.With;
 import org.openrewrite.java.tree.J;
 
 
@@ -23,30 +22,22 @@ public class Graph <ID, T extends J> {
     nodesMap = new HashMap<>();
   }
 
+  @Data
   final class Node {
     // unique ID to present a node in graph
-    @Getter
     ID id;
 
-    @Getter
     T element;
 
-    @Getter
     List<Node> links;
 
-    @Getter
     int inDegree;
-
-    @Getter
-    @Setter
-    int reachedCount;
 
     public Node(ID id, T element) {
       this.id = id;
       this.element = element;
       links = new ArrayList<>();
       inDegree = 0;
-      reachedCount = 0;
     }
   }
 
@@ -79,17 +70,11 @@ public class Graph <ID, T extends J> {
     nodesMap.get(to).inDegree++;
   }
 
-  public void resetReachedCount() {
-    nodesMap.values().forEach(node -> {
-      node.setReachedCount(0);
-    });
-  }
-
   public String print() {
     StringBuilder builder = new StringBuilder();
     builder.append("---Graph---\n");
     nodesMap.values().forEach(node -> {
-      builder.append("  Node: ").append(node.id).append(" inDegree=").append(node.inDegree).append("\n");
+      builder.append("  Node: ").append(node.id).append(" (inDegree=").append(node.inDegree).append(")\n");
       for (Node toNode : node.links) {
         builder.append("    \\-> to Node: ").append(toNode.id).append("\n");
       }

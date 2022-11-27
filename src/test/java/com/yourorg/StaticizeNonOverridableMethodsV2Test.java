@@ -426,7 +426,7 @@ public class StaticizeNonOverridableMethodsV2Test implements RewriteTest {
     }
 
     @Test
-    void nestedClassMethods() {
+    void nestedInstanceMethods() {
         rewriteRun(
             java("""
                         class A {
@@ -442,6 +442,10 @@ public class StaticizeNonOverridableMethodsV2Test implements RewriteTest {
                         
                           private int func3(int x) {
                             return func2(x) + 1;
+                          }
+                           
+                          private int func4(int x) {
+                            return func3(x) + a;
                           }
                         }
                     """,
@@ -460,6 +464,10 @@ public class StaticizeNonOverridableMethodsV2Test implements RewriteTest {
                           private static int func3(int x) {
                             return func2(x) + 1;
                           }
+                          
+                          private int func4(int x) {
+                            return func3(x) + a;
+                          }
                         }
                     """
             )
@@ -467,7 +475,7 @@ public class StaticizeNonOverridableMethodsV2Test implements RewriteTest {
     }
 
     @Test
-    void nestedCircularReferenceClassMethods() {
+    void nestedCyclicInstanceMethods() {
         rewriteRun(
             java("""
                         class CollatzConjecture {
