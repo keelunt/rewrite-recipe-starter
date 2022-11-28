@@ -56,16 +56,8 @@ public class Graph <ID, T extends J> {
    * @param to to-node id
    */
   public void addLink(ID from, T fromElement, ID to, T toElement) {
-    if (!nodesMap.containsKey(from)) {
-      Node fromNode = new Node(from, fromElement);
-      nodesMap.put(from, fromNode);
-    }
-
-    if (!nodesMap.containsKey(to)) {
-      Node toNode = new Node(to, toElement);
-      nodesMap.put(to, toNode);
-    }
-
+    addNode(from, fromElement);
+    addNode(to, toElement);
     nodesMap.get(from).links.add(nodesMap.get(to));
     nodesMap.get(to).inDegree++;
   }
