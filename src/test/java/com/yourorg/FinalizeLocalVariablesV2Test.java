@@ -414,31 +414,31 @@ public class FinalizeLocalVariablesV2Test implements RewriteTest {
             """));
     }
 
-    @Disabled("indentation in the For loop is not correct somehow, to be fixed")
     @Test
     void assignmentInForLoopBody() {
         rewriteRun(java("""
-                class B {
-                  public int forLoopTest(int n) {
-                    int sum;
-                    for (int i = 0; i < n; i++) {
-                      int a = 2;
-                      sum = i + a;
+                    class B {
+                        public int forLoopTest(int n) {
+                            int sum;
+                            for (int i = 0; i < n; i++) {
+                                int a = 2;
+                                sum = i + a;
+                            }
+                            return n;
+                        }
                     }
-                    return n;
-                  }
-                }
-            """, """
-                class B {
-                  public int forLoopTest(int n) {
-                    int sum;
-                    for (int i = 0; i < n; i++) {
-                      final int a = 2;
-                      sum = i + a;
+                """,
+            """
+                    class B {
+                        public int forLoopTest(int n) {
+                            int sum;
+                            for (int i = 0; i < n; i++) {
+                                final int a = 2;
+                                sum = i + a;
+                            }
+                            return n;
+                        }
                     }
-                    return n;
-                  }
-                }
-            """));
+                """));
     }
 }
