@@ -18,11 +18,13 @@ package com.yourorg;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.Queue;
+import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.EqualsAndHashCode;
-import lombok.Value;
 import org.openrewrite.ExecutionContext;
 import org.openrewrite.Recipe;
 import org.openrewrite.Tree;
@@ -32,8 +34,7 @@ import org.openrewrite.java.cleanup.ModifierOrder;
 import org.openrewrite.java.tree.J;
 import org.openrewrite.java.tree.Space;
 
-@Value
-@EqualsAndHashCode(callSuper = true)
+
 public class StaticizeNonOverridableMethods extends Recipe {
 
   @Override
@@ -48,11 +49,10 @@ public class StaticizeNonOverridableMethods extends Recipe {
 
   @Override
   public JavaIsoVisitor<ExecutionContext> getVisitor() {
-    final List<J.MethodDeclaration> instanceMethods = new ArrayList<>();
-    final List<J.VariableDeclarations.NamedVariable> instanceVariables = new ArrayList<>();
+    // list of non-overridable instance methods that can be static
+    final List<J.MethodDeclaration> staticInstanceMethods = new ArrayList<>();
 
     return new JavaIsoVisitor<ExecutionContext>() {
-
       @Override
       public J.ClassDeclaration visitClassDeclaration(J.ClassDeclaration classDecl, ExecutionContext ctx) {
         // Skip nested class (inner class or static nested class)
@@ -61,33 +61,210 @@ public class StaticizeNonOverridableMethods extends Recipe {
           return classDecl;
         }
 
-        instanceVariables.addAll(getInstanceVariables(classDecl));
-        instanceMethods.addAll(getInstanceMethods(classDecl));
+        Graph<String, J> graph = BuildInstanceDataAccessGraph.build(classDecl);
+        staticInstanceMethods.addAll(findStaticMethods(graph));
         return super.visitClassDeclaration(classDecl, ctx);
       }
 
       @Override
       public J.MethodDeclaration visitMethodDeclaration(J.MethodDeclaration method, ExecutionContext ctx) {
-        J.MethodDeclaration m = super.visitMethodDeclaration(method, ctx);
-
-        // if it already has `static` modifier, it doesn't need to add again.
-        if (m.hasModifier(J.Modifier.Type.Static)) {
-          return m;
-        }
-
-        // if it's an overridable methods (neither `private` nor `final`), we don't want to add `static`.
-        if (!m.hasModifier(J.Modifier.Type.Private) && !m.hasModifier(J.Modifier.Type.Final)) {
-          return m;
-        }
-
-        boolean hasInstanceDataAccess = FindInstanceDataAccess.find(getCursor().getValue(),
-            instanceMethods,
-            instanceVariables
-        ).get();
-
-        return hasInstanceDataAccess ? method : addStaticModifier(m);
+        boolean canBeStatic = staticInstanceMethods.stream()
+            .anyMatch(m -> method.getSimpleName().equals(m.getSimpleName()));
+        return canBeStatic ? addStaticModifier(method) : method;
       }
     };
+  }
+
+  private List<J.MethodDeclaration> findStaticMethods(Graph<String, J> graph) {
+    Set<J.MethodDeclaration> instanceAccessedMethods = new HashSet<>();
+
+    // a queue to store instance data accessed elements, an element can be either instance variable or overridable instance method.
+    Queue<Graph<String, J>.Node> accessedElements = graph.getNodesMap().values()
+        .stream()
+        .filter(node -> isInstanceDataAccessed(node.element))
+        .collect(Collectors.toCollection(LinkedList::new));
+    Set<String> visitedNodeIds = new HashSet<>();
+
+    // propagate instance data accessed methods in graph, so the rest methods are not instance data accessed and can be static.
+    while (!accessedElements.isEmpty()) {
+      Graph<String, J>.Node node = accessedElements.poll();
+      if (visitedNodeIds.contains(node.getId())) {
+        continue;
+      }
+      visitedNodeIds.add(node.getId());
+
+      if (node.getElement() instanceof J.MethodDeclaration) {
+        instanceAccessedMethods.add((J.MethodDeclaration) node.getElement() );
+      }
+
+      if (!node.getLinks().isEmpty()) {
+        accessedElements.addAll(node.getLinks());
+      }
+    }
+
+    return graph.getNodesMap()
+        .values()
+        .stream()
+        .map(Graph.Node::getElement)
+        .filter(element -> element instanceof J.MethodDeclaration)
+        .map(J.MethodDeclaration.class::cast)
+        .filter(m -> !instanceAccessedMethods.contains(m))
+        .collect(Collectors.toList());
+  }
+
+  // Any element (method or variable) accessed instance variable or overridable methods(public, protected, or package-private) can not be static.
+  private boolean isInstanceDataAccessed(J element) {
+    if (element instanceof J.Identifier) {
+      // it's an instance variable
+      return true;
+    }
+
+    if (element instanceof J.MethodDeclaration) {
+      return !isNonOverridableMethod((J.MethodDeclaration) element);
+    }
+
+    return false;
+  }
+
+  /**
+   * Visitor to build instance data access graph in a class.
+   * The graph contains two types of elements:
+   *  1. instance variables
+   *  2. instance methods (overridable or non-overridable)
+   * <p>
+   *  e.g. If method `m_a` calls method `m_b` and variable `v`, in the graph, there will be two links in the graph:
+   *  `m_b` -> `m_a` and `v` -> `m_a`;
+   */
+  @EqualsAndHashCode(callSuper = true)
+  private static class BuildInstanceDataAccessGraph extends JavaIsoVisitor<Graph<String, J>> {
+    private final List<J.MethodDeclaration> instanceMethods;
+    private final List<J.VariableDeclarations.NamedVariable> instanceVariables;
+    private final Graph<String, J> instanceDataAccessGraph;
+
+    private BuildInstanceDataAccessGraph(
+    ) {
+      instanceMethods = new ArrayList<>();
+      instanceVariables = new ArrayList<>();
+      instanceDataAccessGraph = new Graph<>();
+    }
+
+    static Graph<String, J> build(J j) {
+      BuildInstanceDataAccessGraph visitor = new BuildInstanceDataAccessGraph();
+      return visitor.reduce(j, visitor.instanceDataAccessGraph);
+    }
+
+    @Override
+    public J.ClassDeclaration visitClassDeclaration(J.ClassDeclaration classDecl, Graph<String, J> graph) {
+      instanceMethods.addAll(getInstanceMethods(classDecl));
+      instanceVariables.addAll(getInstanceVariables(classDecl));
+      instanceMethods.forEach(m -> graph.addNode(buildInstanceMethodId(m), m));
+      instanceVariables.forEach(v -> graph.addNode(buildInstanceVariableId(v.getName()), v.getName()));
+      return super.visitClassDeclaration(classDecl, graph);
+    }
+
+    @Override
+    public J.MethodDeclaration visitMethodDeclaration(J.MethodDeclaration method, Graph<String, J> graph) {
+      J.MethodDeclaration m = super.visitMethodDeclaration(method, graph);
+
+      // skip class methods
+      if (m.hasModifier(J.Modifier.Type.Static)) {
+        return m;
+      }
+
+      AddInstanceDataAccessGraphLinks.process(getCursor().getValue(),
+          method,
+          instanceMethods,
+          instanceVariables,
+          instanceDataAccessGraph);
+      return m;
+    }
+  }
+
+  /**
+   * Visitor to add links in a method to the graph.
+   */
+  @EqualsAndHashCode(callSuper = true)
+  private static class AddInstanceDataAccessGraphLinks extends JavaIsoVisitor<Graph<String, J>> {
+    private final J.MethodDeclaration thisMethod;
+    private final List<J.MethodDeclaration> instanceMethods;
+    private final List<J.VariableDeclarations.NamedVariable> instanceVariables;
+
+    private AddInstanceDataAccessGraphLinks(J.MethodDeclaration thisMethod,
+        List<J.MethodDeclaration> instanceMethods,
+        List<J.VariableDeclarations.NamedVariable> instanceVariables
+    ) {
+      this.thisMethod = thisMethod;
+      this.instanceMethods = instanceMethods;
+      this.instanceVariables = instanceVariables;
+    }
+
+    /**
+     * Add instance data access links to the graph.
+     * @param j subtree to traverse, points to a method.
+     * @param graph graph to be updated by adding links (present instance data access) in this method
+     */
+    static void process(J j,
+        J.MethodDeclaration thisMethod,
+        List<J.MethodDeclaration> instanceMethods,
+        List<J.VariableDeclarations.NamedVariable> instanceVariables,
+        Graph<String, J> graph
+    ) {
+      new AddInstanceDataAccessGraphLinks(thisMethod, instanceMethods, instanceVariables)
+          .reduce(j, graph);
+    }
+
+    @Override
+    public J.Identifier visitIdentifier(J.Identifier identifier, Graph<String, J> graph) {
+      J.Identifier id = super.visitIdentifier(identifier, graph);
+
+      // instance method calls will be handled by `visitMethodInvocation`, handles instance variables only here.
+      boolean isNotVariable = id.getType() == null || id.getFieldType() == null;
+      if (isNotVariable) {
+        return id;
+      }
+
+      boolean isInstanceVariable = instanceVariables.stream()
+          .anyMatch(v -> id.getFieldType().equals(v.getName().getFieldType())
+              && id.getType().equals(v.getName().getType())
+              && id.getSimpleName().equals(v.getSimpleName()));
+
+      if (isInstanceVariable) {
+        graph.addLink(buildInstanceVariableId(id),
+            identifier,
+            buildInstanceMethodId(thisMethod),
+            thisMethod);
+      }
+
+      return id;
+    }
+
+    @Override
+    public J.MethodInvocation visitMethodInvocation(J.MethodInvocation method, Graph<String, J> graph) {
+      J.MethodInvocation m = super.visitMethodInvocation(method, graph);
+
+      // skip recursive
+      if (method.getSimpleName().equals(thisMethod.getSimpleName())) {
+        return m;
+      }
+
+      boolean isInstanceMethod = instanceMethods.stream()
+          .anyMatch(im -> im.getSimpleName().equals(method.getSimpleName()));
+
+      if (isInstanceMethod) {
+        J.MethodDeclaration invokedMethod = instanceMethods.stream()
+            .filter(im -> im.getSimpleName().equals(method.getSimpleName()))
+            .findFirst()
+            .get();
+
+        graph.addLink(buildInstanceMethodId(invokedMethod),
+            invokedMethod,
+            buildInstanceMethodId(thisMethod),
+            thisMethod
+        );
+      }
+
+      return m;
+    }
   }
 
   private static J.MethodDeclaration addStaticModifier(J.MethodDeclaration m) {
@@ -147,75 +324,15 @@ public class StaticizeNonOverridableMethods extends Recipe {
         .collect(Collectors.toList());
   }
 
-  /**
-   * Visitor to find instance data access in a method
-   */
-  @EqualsAndHashCode(callSuper = true)
-  private static class FindInstanceDataAccess extends JavaIsoVisitor<AtomicBoolean> {
-    private final List<J.MethodDeclaration> instanceMethods;
-    private final List<J.VariableDeclarations.NamedVariable> instanceVariables;
+  private static String buildInstanceVariableId(J.Identifier v) {
+    return "V_" + v.getSimpleName();
+  }
 
-    private FindInstanceDataAccess(List<J.MethodDeclaration> instanceMethods,
-        List<J.VariableDeclarations.NamedVariable> instanceVariables
-    ) {
-      this.instanceMethods = instanceMethods;
-      this.instanceVariables = instanceVariables;
-    }
+  private static String buildInstanceMethodId(J.MethodDeclaration m) {
+    return "M_" + m.getSimpleName();
+  }
 
-    /**
-     * @param j The subtree to search, points to a method.
-     * @return whether has instance data access in this method
-     */
-    static AtomicBoolean find(J j,
-        List<J.MethodDeclaration> instanceMethods,
-        List<J.VariableDeclarations.NamedVariable> instanceVariables
-    ) {
-      return new FindInstanceDataAccess(instanceMethods, instanceVariables)
-          .reduce(j, new AtomicBoolean());
-    }
-
-    @Override
-    public J.Identifier visitIdentifier(J.Identifier identifier, AtomicBoolean hasInstanceDataAccess) {
-      if (hasInstanceDataAccess.get()) {
-        return identifier;
-      }
-
-      J.Identifier id = super.visitIdentifier(identifier, hasInstanceDataAccess);
-
-      // instance method calls will be handled by `visitMethodInvocation`, handles instance variables only here.
-      boolean isNotVariable = id.getType() == null || id.getFieldType() == null;
-      if (isNotVariable) {
-        return id;
-      }
-
-      boolean isInstanceVariable = instanceVariables.stream()
-          .anyMatch(v -> id.getFieldType().equals(v.getName().getFieldType())
-              && id.getType().equals(v.getName().getType())
-              && id.getSimpleName().equals(v.getSimpleName()));
-
-      if (isInstanceVariable) {
-        hasInstanceDataAccess.set(true);
-      }
-
-      return id;
-    }
-
-    @Override
-    public J.MethodInvocation visitMethodInvocation(J.MethodInvocation method, AtomicBoolean hasInstanceDataAccess) {
-      if (hasInstanceDataAccess.get()) {
-        return method;
-      }
-
-      J.MethodInvocation m = super.visitMethodInvocation(method, hasInstanceDataAccess);
-
-      boolean isInstanceMethod = instanceMethods.stream()
-          .anyMatch(im -> im.getSimpleName().equals(method.getSimpleName()));
-
-      if (isInstanceMethod) {
-        hasInstanceDataAccess.set(true);
-      }
-
-      return m;
-    }
+  private static boolean isNonOverridableMethod(J.MethodDeclaration m) {
+    return m.hasModifier(J.Modifier.Type.Private) || m.hasModifier(J.Modifier.Type.Final);
   }
 }

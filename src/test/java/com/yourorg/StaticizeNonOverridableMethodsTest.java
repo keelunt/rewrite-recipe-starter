@@ -1,6 +1,5 @@
 package com.yourorg;
 
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.openrewrite.test.RecipeSpec;
 import org.openrewrite.test.RewriteTest;
@@ -227,20 +226,20 @@ public class StaticizeNonOverridableMethodsTest implements RewriteTest {
                           }
                         }
                     """,
-                    """
-                        class A {
-                          int a = 1;
-                                            
-                          private static int func(int b) {
-                            int c = 2;
-                            for (int i = 0; i < b ;i++) {
-                              int a = 2;
-                              c += a;
-                            }
-                            return c + 1;
-                          }
+                """
+                    class A {
+                      int a = 1;
+                                        
+                      private static int func(int b) {
+                        int c = 2;
+                        for (int i = 0; i < b ;i++) {
+                          int a = 2;
+                          c += a;
                         }
-                        """
+                        return c + 1;
+                      }
+                    }
+                    """
             )
         );
     }
@@ -404,7 +403,6 @@ public class StaticizeNonOverridableMethodsTest implements RewriteTest {
         );
     }
 
-    @Disabled("Recursive is not supported")
     @Test
     void recursive() {
         rewriteRun(
@@ -426,7 +424,6 @@ public class StaticizeNonOverridableMethodsTest implements RewriteTest {
         );
     }
 
-    @Disabled("For this nested case (without circular reference), current recipe can staticize `func1` only. this case can be covered by running the recipe multiple times.")
     @Test
     void nestedInstanceMethods() {
         rewriteRun(
@@ -445,7 +442,7 @@ public class StaticizeNonOverridableMethodsTest implements RewriteTest {
                           private int func3(int x) {
                             return func2(x) + 1;
                           }
-                          
+                           
                           private int func4(int x) {
                             return func3(x) + a;
                           }
@@ -476,7 +473,6 @@ public class StaticizeNonOverridableMethodsTest implements RewriteTest {
         );
     }
 
-    @Disabled("nested case with circular reference, two (or more) methods call to each other, and both can be static. this case can not be covered by running the recipe multiple times.")
     @Test
     void nestedCyclicInstanceMethods() {
         rewriteRun(
