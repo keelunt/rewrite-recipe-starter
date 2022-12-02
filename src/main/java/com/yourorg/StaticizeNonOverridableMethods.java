@@ -31,7 +31,9 @@ import org.openrewrite.Tree;
 import org.openrewrite.internal.ListUtils;
 import org.openrewrite.java.JavaIsoVisitor;
 import org.openrewrite.java.cleanup.ModifierOrder;
+import org.openrewrite.java.tree.Flag;
 import org.openrewrite.java.tree.J;
+import org.openrewrite.java.tree.JavaType;
 import org.openrewrite.java.tree.Space;
 
 
@@ -123,6 +125,10 @@ public class StaticizeNonOverridableMethods extends Recipe {
       return !isNonOverridableMethod((J.MethodDeclaration) element);
     }
 
+    // a base class method has a null element.
+    if (element == null) {
+      return true;
+    }
     return false;
   }
 
@@ -141,8 +147,7 @@ public class StaticizeNonOverridableMethods extends Recipe {
     private final List<J.VariableDeclarations.NamedVariable> instanceVariables;
     private final Graph<String, J> instanceDataAccessGraph;
 
-    private BuildInstanceDataAccessGraph(
-    ) {
+    private BuildInstanceDataAccessGraph() {
       instanceMethods = new ArrayList<>();
       instanceVariables = new ArrayList<>();
       instanceDataAccessGraph = new Graph<>();
@@ -228,6 +233,14 @@ public class StaticizeNonOverridableMethods extends Recipe {
               && id.getType().equals(v.getName().getType())
               && id.getSimpleName().equals(v.getSimpleName()));
 
+      // the variable may be a base class instance variable
+      if (!isInstanceVariable
+          && id.getFieldType() != null
+          && id.getFieldType().getOwner() instanceof JavaType.Class
+          && !id.getFieldType().getFlags().contains(Flag.Static)) {
+        isInstanceVariable = true;
+      }
+
       if (isInstanceVariable) {
         graph.addLink(buildInstanceVariableId(id),
             identifier,
@@ -249,12 +262,24 @@ public class StaticizeNonOverridableMethods extends Recipe {
 
       boolean isInstanceMethod = instanceMethods.stream()
           .anyMatch(im -> im.getSimpleName().equals(method.getSimpleName()));
+      boolean isBaseClassMethod = false;
 
-      if (isInstanceMethod) {
-        J.MethodDeclaration invokedMethod = instanceMethods.stream()
-            .filter(im -> im.getSimpleName().equals(method.getSimpleName()))
-            .findFirst()
-            .get();
+      // the method may be a base class instance method
+      if (!isInstanceMethod
+          && method.getMethodType() != null
+          && method.getMethodType().getDeclaringType() instanceof JavaType.Class
+          && !method.getMethodType().getFlags().contains(Flag.Static)) {
+        isBaseClassMethod = true;
+      }
+
+      if (isInstanceMethod || isBaseClassMethod) {
+        J.MethodDeclaration invokedMethod = null;
+        if (isInstanceMethod) {
+          invokedMethod = instanceMethods.stream()
+              .filter(im -> im.getSimpleName().equals(method.getSimpleName()))
+              .findFirst()
+              .get();
+        }
 
         graph.addLink(buildInstanceMethodId(invokedMethod),
             invokedMethod,
@@ -329,7 +354,8 @@ public class StaticizeNonOverridableMethods extends Recipe {
   }
 
   private static String buildInstanceMethodId(J.MethodDeclaration m) {
-    return "M_" + m.getSimpleName();
+    String methodName = m != null ? m.getSimpleName() : "BaseClassMethod";
+    return "M_" + methodName;
   }
 
   private static boolean isNonOverridableMethod(J.MethodDeclaration m) {

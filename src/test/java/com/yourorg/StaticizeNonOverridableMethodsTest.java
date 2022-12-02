@@ -515,4 +515,32 @@ public class StaticizeNonOverridableMethodsTest implements RewriteTest {
             )
         );
     }
+
+    @Test
+    void subclassAccess() {
+        rewriteRun(
+            java("""
+                        class A {
+                            protected int a;
+                            
+                            protected int func1() {
+                                return a;
+                            }
+                        }
+                """
+            ),
+            java("""
+                        class B extends A {
+                            private int func2() {
+                                return 1 + a;
+                            }
+                            
+                            private int fun3() {
+                                return func1();
+                            }
+                        }
+                """
+            )
+        );
+    }
 }
