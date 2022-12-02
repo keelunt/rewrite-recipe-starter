@@ -6,7 +6,7 @@ import org.openrewrite.test.RewriteTest;
 
 import static org.openrewrite.java.Assertions.*;
 
-public class StaticizeNonOverridableMethodsTest implements RewriteTest {
+class StaticizeNonOverridableMethodsTest implements RewriteTest {
 
     @Override
     public void defaults(RecipeSpec spec) {
@@ -535,12 +535,45 @@ public class StaticizeNonOverridableMethodsTest implements RewriteTest {
                                 return 1 + a;
                             }
                             
-                            private int fun3() {
+                            private int func3() {
                                 return func1();
                             }
                         }
                 """
             )
+        );
+    }
+
+    @Test
+    void overloadMethods() {
+        rewriteRun(
+            java("""
+                        class A {
+                            protected int a;
+                        
+                            private int func1(int x) {
+                              return x + 1;
+                            }
+                        
+                            private int func1() {
+                                return a;
+                            }
+                        }
+                """,
+                    """
+                        class A {
+                            protected int a;
+                        
+                            private static int func1(int x) {
+                              return x + 1;
+                            }
+                        
+                            private int func1() {
+                                return a;
+                            }
+                        }
+                    """
+                )
         );
     }
 }

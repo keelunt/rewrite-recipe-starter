@@ -64,6 +64,7 @@ public class StaticizeNonOverridableMethods extends Recipe {
         }
 
         Graph<String, J> graph = BuildInstanceDataAccessGraph.build(classDecl);
+
         staticInstanceMethods.addAll(findStaticMethods(graph));
         return super.visitClassDeclaration(classDecl, ctx);
       }
@@ -71,7 +72,8 @@ public class StaticizeNonOverridableMethods extends Recipe {
       @Override
       public J.MethodDeclaration visitMethodDeclaration(J.MethodDeclaration method, ExecutionContext ctx) {
         boolean canBeStatic = staticInstanceMethods.stream()
-            .anyMatch(m -> method.getSimpleName().equals(m.getSimpleName()));
+            .anyMatch(m -> method.getSimpleName().equals(m.getSimpleName())
+                && method.getParameters().equals(m.getParameters()));
         return canBeStatic ? addStaticModifier(method) : method;
       }
     };
@@ -350,12 +352,18 @@ public class StaticizeNonOverridableMethods extends Recipe {
   }
 
   private static String buildInstanceVariableId(J.Identifier v) {
-    return "V_" + v.getSimpleName();
+    return "V_" + v.getSimpleName() + "_" + v.getFieldType();
   }
 
   private static String buildInstanceMethodId(J.MethodDeclaration m) {
-    String methodName = m != null ? m.getSimpleName() : "BaseClassMethod";
-    return "M_" + methodName;
+    if (m != null) {
+      String methodName = m.getSimpleName();
+      StringBuilder params = new StringBuilder();
+      m.getParameters().forEach(statement -> params.append(statement));
+      return "M_" + methodName + "_" + params.toString();
+    } else {
+      return "M_anyBaseClassMethod";
+    }
   }
 
   private static boolean isNonOverridableMethod(J.MethodDeclaration m) {
